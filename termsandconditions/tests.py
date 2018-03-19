@@ -43,6 +43,14 @@ class TermsAndConditionsTests(TestCase):
         self.terms4 = TermsAndConditions.objects.create(id=4, slug="contrib-terms", name="Contributor Terms",
                                                         text="Contributor Terms and Conditions 2", version_number=2.0,
                                                         date_active="2100-01-01")
+        self.terms5 = TermsAndConditions.objects.create(
+            id=5,
+            slug="always-active-terms",
+            name="Always Active Terms",
+            text="Always Active Terms and Conditions 1",
+            version_number=1.0,
+            date_active=None
+        )
 
         # give user3 permission to skip T&Cs
         content_type = ContentType.objects.get_for_model(type(self.user3))
@@ -66,20 +74,27 @@ class TermsAndConditionsTests(TestCase):
         # Accept the terms and try again
         UserTermsAndConditions.objects.create(user=self.user1, terms=self.terms2)
         UserTermsAndConditions.objects.create(user=self.user1, terms=self.terms3)
+        UserTermsAndConditions.objects.create(user=self.user1, terms=self.terms5)
         response = user_accept_terms('backend', self.user1, '123')
         self.assertIsInstance(response, dict)
 
     def test_get_active_terms_list(self):
         """Test get list of active T&Cs"""
         active_list = TermsAndConditions.get_active_terms_list()
-        self.assertEqual(2, len(active_list))
-        self.assertQuerysetEqual(active_list, [repr(self.terms3), repr(self.terms2)])
+        self.assertEqual(3, len(active_list))
+        self.assertQuerysetEqual(
+            active_list,
+            [repr(self.terms5), repr(self.terms3), repr(self.terms2)]
+        )
 
     def test_get_active_terms_not_agreed_to(self):
         """Test get T&Cs not agreed to"""
         active_list = TermsAndConditions.get_active_terms_not_agreed_to(self.user1)
-        self.assertEqual(2, len(active_list))
-        self.assertQuerysetEqual(active_list, [repr(self.terms3), repr(self.terms2)])
+        self.assertEqual(3, len(active_list))
+        self.assertQuerysetEqual(
+            active_list,
+            [repr(self.terms5), repr(self.terms3), repr(self.terms2)]
+        )
 
     def test_user_is_excluded(self):
         """Test user3 has perm which excludes them from having to accept T&Cs"""
@@ -89,21 +104,27 @@ class TermsAndConditionsTests(TestCase):
     def test_superuser_is_not_implicitly_excluded(self):
         """Test su should have to accept T&Cs even if they are superuser but don't explicitly have the skip perm"""
         active_list = TermsAndConditions.get_active_terms_not_agreed_to(self.su)
-        self.assertEqual(2, len(active_list))
-        self.assertQuerysetEqual(active_list, [repr(self.terms3), repr(self.terms2)])
+        self.assertEqual(3, len(active_list))
+        self.assertQuerysetEqual(
+            active_list,
+            [repr(self.terms5), repr(self.terms3), repr(self.terms2)]
+        )
 
     def test_superuser_cannot_skip(self):
         """Test su still has to accept even if they are explicitly given the skip perm"""
         self.su.user_permissions.add(self.skip_perm)
         active_list = TermsAndConditions.get_active_terms_not_agreed_to(self.su)
-        self.assertEqual(2, len(active_list))
-        self.assertQuerysetEqual(active_list, [repr(self.terms3), repr(self.terms2)])
+        self.assertEqual(3, len(active_list))
+        self.assertQuerysetEqual(
+            active_list,
+            [repr(self.terms5), repr(self.terms3), repr(self.terms2)]
+        )
 
     def test_get_active_terms_ids(self):
         """Test get ids of active T&Cs"""
         active_list = TermsAndConditions.get_active_terms_ids()
-        self.assertEqual(2, len(active_list))
-        self.assertEqual(active_list, [3, 2])
+        self.assertEqual(3, len(active_list))
+        self.assertEqual(active_list, [5, 3, 2])
 
     def test_terms_and_conditions_models(self):
         """Various tests of the TermsAndConditions Module"""
@@ -136,7 +157,7 @@ class TermsAndConditionsTests(TestCase):
 
         LOGGER.debug('Test /secure/ after login')
         logged_in_response = self.client.get('/secure/', follow=True)
-        self.assertRedirects(logged_in_response, '/terms/accept/contrib-terms?returnTo=/secure/')
+        self.assertRedirects(logged_in_response, '/terms/accept/always-active-terms?returnTo=/secure/')
 
     def test_terms_required_redirect(self):
         """Validate that a user is redirected to the terms accept page if logged in, and decorator is on method"""
@@ -168,21 +189,13 @@ class TermsAndConditionsTests(TestCase):
         login_response = self.client.login(username='user1', password='user1password')
         self.assertTrue(login_response)
 
-        LOGGER.debug('Test /terms/accept/ get')
+        LOGGER.debug('Test /terms/accept/ GET')
         accept_response = self.client.get('/terms/accept/', follow=True)
         self.assertContains(accept_response, "Accept")
 
-        LOGGER.debug('Test /terms/accept/ post')
-        chained_terms_response = self.client.post('/terms/accept/', {'terms': 2, 'returnTo': '/secure/'}, follow=True)
-        self.assertContains(chained_terms_response, "Contributor")
-
-        LOGGER.debug('Test /terms/accept/contrib-terms/1.5/ post')
-        accept_version_response = self.client.get('/terms/accept/contrib-terms/1.5/', follow=True)
-        self.assertContains(accept_version_response, "Contributor Terms and Conditions 1.5")
-
-        LOGGER.debug('Test /terms/accept/contrib-terms/3/ post')
-        accept_version_post_response = self.client.post('/terms/accept/', {'terms': 3, 'returnTo': '/secure/'}, follow=True)
-        self.assertContains(accept_version_post_response, "Secure")
+        LOGGER.debug('Test /terms/accept/ POST')
+        chained_terms_response = self.client.post('/terms/accept/', {'terms': [5,3,2], 'returnTo': '/secure/'}, follow=True)
+        self.assertContains(chained_terms_response, "Secure")
 
     def test_accept_store_ip_address(self):
         """Test with IP address storage setting true (default)"""
@@ -212,14 +225,19 @@ class TermsAndConditionsTests(TestCase):
 
         LOGGER.debug('Test user1 not redirected after login')
         logged_in_response = self.client.get('/secure/', follow=True)
-        self.assertContains(logged_in_response, "Contributor")
+        self.assertContains(logged_in_response, "Always")
 
-        # First, Accept Contributor Terms
+
+        # First, Accept Other Terms
+        LOGGER.debug('Test /terms/accept/contrib-terms/5/ post')
+        self.client.post('/terms/accept/', {'terms': 5, 'returnTo': '/secure/'}, follow=True)
+
+        # Then, Accept Contributor Terms
         LOGGER.debug('Test /terms/accept/contrib-terms/3/ post')
         self.client.post('/terms/accept/', {'terms': 3, 'returnTo': '/secure/'}, follow=True)
 
         LOGGER.debug('Test upgrade terms')
-        self.terms5 = TermsAndConditions.objects.create(id=5, slug="site-terms", name="Site Terms",
+        self.terms5 = TermsAndConditions.objects.create(id=6, slug="site-terms", name="Site Terms",
                                                         text="Terms and Conditions2", version_number=2.5,
                                                         date_active="2012-02-05")
 
