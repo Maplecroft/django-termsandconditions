@@ -4,6 +4,7 @@
 from collections import OrderedDict
 
 from django.db import models
+from django.db.models import Q, F
 from django.conf import settings
 from django.utils import timezone
 from django.core.cache import cache
@@ -68,9 +69,9 @@ class TermsAndConditions(models.Model):
         if active_terms is None:
             try:
                 active_terms = TermsAndConditions.objects.filter(
-                    date_active__isnull=False,
-                    date_active__lte=timezone.now(),
-                    slug=slug).latest('date_active')
+                    Q(date_active__isnull=True) | Q(date_active__lte=timezone.now()),
+                    slug=slug
+                    ).latest('date_active')
                 cache.set('tandc.active_terms_' + slug, active_terms, TERMS_CACHE_SECONDS)
             except TermsAndConditions.DoesNotExist:   # pragma: nocover
                 LOGGER.error("Requested Terms and Conditions that Have Not Been Created.")
@@ -87,7 +88,9 @@ class TermsAndConditions(models.Model):
             active_terms_dict = {}
             active_terms_ids = []
 
-            active_terms_set = TermsAndConditions.objects.filter(date_active__isnull=False, date_active__lte=timezone.now()).order_by('date_active')
+            active_terms_set = TermsAndConditions.objects.filter(
+                Q(date_active__isnull=True) | Q(date_active__lte=timezone.now())
+            ).order_by('date_active')
             for active_terms in active_terms_set:
                 active_terms_dict[active_terms.slug] = active_terms.id
 
